@@ -1,0 +1,15 @@
+node_modules/
+.DS_Store
+
+# Resumable scrape state — large, transient
+data/progress.json
+
+# Regenerated build artifacts (the assets in output/ — mp4, jpg, svg — are committed; the HTML is not)
+output/state-of-disclosure.html
+output/chart.html
+
+# Cloudflare Wrangler local cache
+.wrangler/
+
+# Temporary partial snapshots
+data/snapshot-PARTIAL.json

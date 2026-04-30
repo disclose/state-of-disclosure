@@ -1,0 +1,13 @@
+{
+  "name": "diostatus-snapshot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One-shot snapshot of directory.disclose.io maturity-level distribution + chart renderer",
+  "scripts": {
+    "scrape": "bun run src/scrape.ts",
+    "aggregate": "bun run src/aggregate.ts",
+    "render": "bun run src/render.ts",
+    "all": "bun run src/scrape.ts && bun run src/aggregate.ts && bun run src/render.ts"
+  }
+}
