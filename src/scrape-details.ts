@@ -15,7 +15,7 @@ import { readdirSync, existsSync } from 'node:fs';
 
 const DIRECTORY_BASE = 'https://directory.disclose.io';
 const USER_AGENT = 'lookup.disclose.io/1.0 (directory lookup)';
-const REQUEST_DELAY_MS = 700;
+const REQUEST_DELAY_MS = 250;
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 3;
 const TARGET_LEVELS = [5, 4, 3] as const;
@@ -264,7 +264,7 @@ async function saveLevelFile(level: number, orgs: OrgDetail[], source: string): 
   const file: LevelFile = {
     level,
     fetchedAt: new Date().toISOString(),
-    source,
+    source: source.split('/').pop() || source, // basename only — never leak absolute home paths into committed data
     count: orgs.length,
     orgs,
   };

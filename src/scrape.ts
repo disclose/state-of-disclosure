@@ -1,13 +1,24 @@
-// Sweep directory.disclose.io page-by-page and capture the maturity badge for every org.
-// One-shot snapshot — re-runnable, resumable. Reuses the badge/score parsing strategy
-// from ~/Projects/lookup-disclose-io/src/steps/diodb.ts but updated to read the
-// CSS class suffix (m-badge-basic|partial|full|full-pluscvd) which encodes the level.
+// Sweep the disclose.io directory via the disclosebot JSON API and capture the maturity
+// level/score for every org. One-shot snapshot — re-runnable, resumable.
+//
+// API: https://widgets.disclosebot.io/directory/{shortcode}?page=N
+//   * origin-gated — requires the `Origin: https://directory.disclose.io` header
+//   * perPage is locked server-side at 25 (the param is ignored); CSV export disabled
+//   * each org carries maturity{level,score,label} inline, so the old two-stage HTML scrape
+//     (listing badge-class + per-detail-page) collapses to this single pass for the listing.
+//
+// The emitted snapshot keeps the SAME schema the previous HTML scraper produced
+// ({slug, program_name, badge, badge_text, score_percent, level}) so aggregate.ts,
+// scrape-details.ts, and build-page.ts all run unchanged.
 
-const DIRECTORY_BASE = 'https://directory.disclose.io';
-const USER_AGENT = 'lookup.disclose.io/1.0 (directory lookup)';
-const REQUEST_DELAY_MS = 700;
-const FETCH_TIMEOUT_MS = 15_000;
-const MAX_RETRIES = 3;
+const SHORTCODE = 'adf701';
+const API_BASE = `https://widgets.disclosebot.io/directory/${SHORTCODE}`;
+const DIRECTORY_BASE = 'https://directory.disclose.io'; // human-facing; used for the Origin header + downstream org links
+const ORIGIN_HEADER = DIRECTORY_BASE;
+const USER_AGENT = 'state-of-disclosure/2.0 (diostatus-snapshot; +https://state.disclose.io)';
+const REQUEST_DELAY_MS = 200;
+const FETCH_TIMEOUT_MS = 20_000;
+const MAX_RETRIES = 4;
 
 const PROGRESS_PATH = `${import.meta.dir}/../data/progress.json`;
 const today = new Date().toISOString().slice(0, 10);
@@ -15,14 +26,13 @@ const SNAPSHOT_PATH = `${import.meta.dir}/../data/snapshot-${today}.json`;
 
 type BadgeKey = 'basic' | 'partial' | 'full' | 'full-pluscvd' | null;
 
-// Maps the CSS class suffix to the disclose.io maturity level (0..5).
-// Level 0 (Not Present) is excluded by definition — those orgs aren't in the directory.
-// Level 1 (Contact Only) corresponds to rows with no badge / no score.
-const BADGE_TO_LEVEL: Record<NonNullable<BadgeKey>, number> = {
-  basic: 2,
-  partial: 3,
-  full: 4,
-  'full-pluscvd': 5,
+// Inverse of the legacy CSS-class→level mapping, so downstream code that keys off `badge`
+// (build-page.ts) keeps working. Level 1 (Contact Only) and 0 carry no badge.
+const LEVEL_TO_BADGE: Record<number, BadgeKey> = {
+  2: 'basic',
+  3: 'partial',
+  4: 'full',
+  5: 'full-pluscvd',
 };
 
 interface OrgRow {
@@ -42,88 +52,74 @@ interface Progress {
   orgs: OrgRow[];
 }
 
-function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&apos;/gi, "'")
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .trim();
+// ---- API response shapes (only the fields we read) ----
+interface ApiMaturity {
+  level: number | null;
+  score: number | null;
+  label: string | null;
+}
+interface ApiOrg {
+  id: string;
+  name: string;
+  slug: string;
+  maturity: ApiMaturity | null;
+}
+interface ApiPagination {
+  page: number;
+  perPage: number;
+  totalItems: number;
+  totalPages: number;
+}
+interface ApiResponse {
+  organizations: ApiOrg[];
+  pagination: ApiPagination;
 }
 
-function classifyBadgeClass(rowHtml: string): BadgeKey {
-  const cls = rowHtml.match(/class="m-badge\s+m-badge-([a-z-]+)"/i);
-  if (!cls) return null;
-  const key = cls[1].toLowerCase();
-  if (key === 'basic' || key === 'partial' || key === 'full' || key === 'full-pluscvd') {
-    return key;
-  }
-  return null;
-}
-
-function parseRow(rowHtml: string): OrgRow | null {
-  if (rowHtml.includes('empty-row') || !rowHtml.includes('org-name')) return null;
-
-  const orgMatch = rowHtml.match(/<td class="org-name"[\s\S]*?<a href="\/([^"]+)" title="([^"]+)">/i);
-  if (!orgMatch) return null;
-
-  const badgeKey = classifyBadgeClass(rowHtml);
-  const badgeTextMatch = rowHtml.match(/class="m-badge[^"]*"[^>]*>([^<]+)<\/span>/i);
-  // Score percent lives in the badge title attribute: title="Maturity Score: 45%"
-  const scoreMatch = rowHtml.match(/title="Maturity Score:\s*([\d.]+)%"/i);
-
-  const level = badgeKey === null ? 1 : BADGE_TO_LEVEL[badgeKey];
-
+function mapOrg(api: ApiOrg): OrgRow | null {
+  if (!api || typeof api.slug !== 'string' || api.slug.length === 0) return null;
+  const m = api.maturity ?? { level: null, score: null, label: null };
+  const rawLevel = typeof m.level === 'number' && Number.isFinite(m.level) ? m.level : 1;
+  // The directory's 5-tier pyramid floors at L1 (Contact Only). The API exposes a sub-tier
+  // "None" (level 0) for orgs with no policy at all; the legacy HTML scraper lumped these into
+  // L1 (unbadged). Fold 0→1 to match that contract and keep the 5-level design (no L0 palette).
+  const level = rawLevel < 1 ? 1 : rawLevel;
+  const badged = level >= 2;
   return {
-    slug: orgMatch[1],
-    program_name: decodeHtmlEntities(orgMatch[2]),
-    badge: badgeKey,
-    badge_text: badgeTextMatch ? decodeHtmlEntities(badgeTextMatch[1]) : null,
-    score_percent: scoreMatch ? Number.parseFloat(scoreMatch[1]) : null,
+    slug: api.slug,
+    program_name: typeof api.name === 'string' ? api.name : api.slug,
+    badge: LEVEL_TO_BADGE[level] ?? null,
+    badge_text: badged && typeof m.label === 'string' ? m.label : null,
+    score_percent: badged && typeof m.score === 'number' && Number.isFinite(m.score) ? m.score : null,
     level,
   };
 }
 
-function parsePage(html: string): { rows: OrgRow[]; totalPrograms: number | null; lastPage: number | null } {
-  const rows: OrgRow[] = [];
-  for (const m of html.matchAll(/<tr>([\s\S]*?)<\/tr>/gi)) {
-    const row = parseRow(m[1]);
-    if (row) rows.push(row);
-  }
-
-  const totalMatch = html.match(/Showing\s+\d+\s+to\s+\d+\s+of\s+([\d,]+)\s+programs/i);
-  const totalPrograms = totalMatch ? Number.parseInt(totalMatch[1].replace(/,/g, ''), 10) : null;
-
-  // Find the highest page= number in pagination links — that's the last page.
-  let lastPage: number | null = null;
-  for (const m of html.matchAll(/href="\?page=(\d+)"/g)) {
-    const n = Number.parseInt(m[1], 10);
-    if (lastPage === null || n > lastPage) lastPage = n;
-  }
-
-  return { rows, totalPrograms, lastPage };
-}
-
-async function fetchPage(page: number): Promise<string> {
-  const url = page === 1 ? `${DIRECTORY_BASE}/` : `${DIRECTORY_BASE}/?page=${page}`;
+async function fetchPage(page: number): Promise<ApiResponse> {
+  const url = `${API_BASE}?page=${page}`;
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const response = await fetch(url, {
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         redirect: 'follow',
-        headers: { 'User-Agent': USER_AGENT },
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Origin': ORIGIN_HEADER,
+          'Referer': `${ORIGIN_HEADER}/`,
+          'Accept': 'application/json',
+        },
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} on page ${page}`);
       }
-      return await response.text();
+      const json = (await response.json()) as ApiResponse;
+      if (!json || !Array.isArray(json.organizations) || !json.pagination) {
+        throw new Error(`malformed response on page ${page}`);
+      }
+      return json;
     } catch (err) {
       lastErr = err;
-      const backoff = 1000 * attempt * attempt;
+      const backoff = 800 * attempt * attempt;
       console.warn(`  ! page ${page} attempt ${attempt} failed: ${(err as Error).message} — retrying in ${backoff}ms`);
       await Bun.sleep(backoff);
     }
@@ -135,7 +131,7 @@ async function loadProgress(): Promise<Progress | null> {
   const file = Bun.file(PROGRESS_PATH);
   if (!(await file.exists())) return null;
   try {
-    return await file.json() as Progress;
+    return (await file.json()) as Progress;
   } catch {
     return null;
   }
@@ -146,13 +142,13 @@ async function saveProgress(progress: Progress): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  console.log(`diostatus-snapshot: scraping ${DIRECTORY_BASE}`);
+  console.log(`diostatus-snapshot: scraping API ${API_BASE}`);
 
   let progress = await loadProgress();
   let startPage = 1;
 
-  if (progress && progress.lastCompletedPage > 0) {
-    console.log(`Resuming: ${progress.orgs.length} orgs already captured through page ${progress.lastCompletedPage}/${progress.totalPages}`);
+  if (progress && progress.lastCompletedPage > 0 && progress.totalPages > 0) {
+    console.log(`Resuming: ${progress.orgs.length} orgs captured through page ${progress.lastCompletedPage}/${progress.totalPages}`);
     startPage = progress.lastCompletedPage + 1;
   } else {
     progress = {
@@ -166,35 +162,33 @@ async function main(): Promise<void> {
 
   const seenSlugs = new Set(progress.orgs.map(o => o.slug));
 
-  // Probe page 1 to learn totalPages if we don't already know.
+  // Probe page 1 to learn totalPages/totalItems if we don't already know.
   if (progress.totalPages === 0) {
-    const html = await fetchPage(1);
-    const parsed = parsePage(html);
-    progress.totalPages = parsed.lastPage ?? 1;
-    progress.totalProgramsAdvertised = parsed.totalPrograms;
-    console.log(`Discovered: ${parsed.totalPrograms?.toLocaleString() ?? '?'} programs across ${progress.totalPages} pages`);
+    const first = await fetchPage(1);
+    progress.totalPages = first.pagination.totalPages;
+    progress.totalProgramsAdvertised = first.pagination.totalItems;
+    console.log(`Discovered: ${first.pagination.totalItems.toLocaleString()} programs across ${progress.totalPages} pages (perPage ${first.pagination.perPage})`);
 
-    if (startPage === 1) {
-      for (const row of parsed.rows) {
-        if (!seenSlugs.has(row.slug)) {
-          progress.orgs.push(row);
-          seenSlugs.add(row.slug);
-        }
+    for (const apiOrg of first.organizations) {
+      const row = mapOrg(apiOrg);
+      if (row && !seenSlugs.has(row.slug)) {
+        progress.orgs.push(row);
+        seenSlugs.add(row.slug);
       }
-      progress.lastCompletedPage = 1;
-      await saveProgress(progress);
-      startPage = 2;
-      await Bun.sleep(REQUEST_DELAY_MS);
     }
+    progress.lastCompletedPage = 1;
+    await saveProgress(progress);
+    startPage = 2;
+    await Bun.sleep(REQUEST_DELAY_MS);
   }
 
   for (let page = startPage; page <= progress.totalPages; page++) {
-    const html = await fetchPage(page);
-    const parsed = parsePage(html);
+    const parsed = await fetchPage(page);
 
     let added = 0;
-    for (const row of parsed.rows) {
-      if (!seenSlugs.has(row.slug)) {
+    for (const apiOrg of parsed.organizations) {
+      const row = mapOrg(apiOrg);
+      if (row && !seenSlugs.has(row.slug)) {
         progress.orgs.push(row);
         seenSlugs.add(row.slug);
         added++;
@@ -202,25 +196,26 @@ async function main(): Promise<void> {
     }
     progress.lastCompletedPage = page;
 
-    if (page % 10 === 0 || page === progress.totalPages || parsed.rows.length === 0) {
+    if (page % 25 === 0 || page === progress.totalPages || parsed.organizations.length === 0) {
       await saveProgress(progress);
       const pct = ((page / progress.totalPages) * 100).toFixed(1);
-      console.log(`  page ${page}/${progress.totalPages} (${pct}%) — +${added} (${progress.orgs.length} total, ${parsed.rows.length} on page)`);
+      console.log(`  page ${page}/${progress.totalPages} (${pct}%) — +${added} (${progress.orgs.length} total, ${parsed.organizations.length} on page)`);
     }
 
-    if (parsed.rows.length === 0) {
-      console.log(`  page ${page} returned 0 rows — stopping early`);
+    if (parsed.organizations.length === 0) {
+      console.log(`  page ${page} returned 0 orgs — stopping early`);
       break;
     }
 
     await Bun.sleep(REQUEST_DELAY_MS);
   }
 
-  // Finalise snapshot.
+  // Finalise snapshot — schema identical to the previous HTML scraper's output.
   const snapshot = {
     fetchedAt: progress.startedAt,
     finishedAt: new Date().toISOString(),
     directoryBase: DIRECTORY_BASE,
+    sourceApi: API_BASE,
     totalProgramsAdvertised: progress.totalProgramsAdvertised,
     totalProgramsCaptured: progress.orgs.length,
     pages: progress.totalPages,

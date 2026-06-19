@@ -1,7 +1,7 @@
 {
   "level": 5,
   "fetchedAt": "2026-04-29T21:11:36.544Z",
-  "source": "/Users/cje/Projects/diostatus-snapshot/src/../data/snapshot-2026-04-29.json",
+  "source": "snapshot-2026-04-29.json",
   "count": 184,
   "orgs": [
     {

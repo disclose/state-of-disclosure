@@ -28,7 +28,11 @@ The build sweeps `directory.disclose.io` for all ~27.5k programs, fetches detail
 Requires [Bun](https://bun.sh).
 
 ```bash
-# 1. Sweep directory.disclose.io for all programs (~13 min, resumable)
+# 1. Sweep the directory via the disclosebot JSON API for all programs (~5 min, resumable)
+#    API: widgets.disclosebot.io/directory/adf701?page=N — origin-gated (sends the
+#    `Origin: https://directory.disclose.io` header), perPage locked at 25 → 1,104 pages.
+#    maturity{level,score,label} comes inline; API level-0 ("None") is folded into L1 to
+#    match the directory's 5-tier pyramid. The old HTML listing scrape is retired.
 bun run src/scrape.ts
 
 # 2. Fetch detail pages for L5 → L4 → L3 (~30 min, resumable per level)
@@ -56,7 +60,10 @@ Output lands at `output/state-of-disclosure.html`. Drop it on any static host.
 
 ## Deploy
 
-The unlisted staging build sits on Cloudflare Pages. To re-deploy after a local rebuild:
+The live custom domain **`state.disclose.io`** is bound to the Cloudflare Pages project
+**`state-disclosure`** (production branch `main`) — NOT the older
+`state-disclosure-20260429-f12de2b9` staging project. Deploy to `state-disclosure` or the
+live site won't change.
 
 ```bash
 # Stage assets (regenerated index + the video, poster, and SRLDF logo)
@@ -66,11 +73,11 @@ cp output/policymaker-demo.mp4    /tmp/sod-deploy/
 cp output/policymaker-demo.jpg    /tmp/sod-deploy/
 cp output/srldf-logo.svg          /tmp/sod-deploy/
 
-# Deploy (OAuth login — env tokens lack Pages permissions)
-(unset CF_API_TOKEN && unset CLOUDFLARE_API_TOKEN && \
-  npx wrangler pages deploy /tmp/sod-deploy \
-    --project-name=state-disclosure-20260429-f12de2b9 \
-    --commit-dirty=true --branch main)
+# Deploy with a Pages-scoped Cloudflare API token (works headless — no OAuth needed).
+# Requires CLOUDFLARE_API_TOKEN (Pages → Edit) and CLOUDFLARE_ACCOUNT_ID in the environment.
+CLOUDFLARE_API_TOKEN="$CF_PAGES_EDIT_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID" \
+  bunx wrangler pages deploy /tmp/sod-deploy \
+    --project-name=state-disclosure --branch=main --commit-dirty=true
 ```
 
 ---
