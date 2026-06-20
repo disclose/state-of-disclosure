@@ -568,7 +568,8 @@ function renderPage(args: {
 <meta name="twitter:title" content="The State of Vulnerability Disclosure">
 <meta name="twitter:description" content="${total.toLocaleString()} programs · ${counts[5]?.toLocaleString() ?? 0} at Level 5 · ${threats.length} confirmed threats · the maturity-model pyramid for the entire disclose.io directory.">
 <meta name="twitter:site" content="@disclose_io">
-<link rel="canonical" href="https://disclose.io/state-of-vulnerability-disclosure/">
+<link rel="canonical" href="https://state.disclose.io/">
+<meta property="og:url" content="https://state.disclose.io/">
 <style>
   :root {
     --bg: #ffffff;
