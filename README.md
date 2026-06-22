@@ -4,7 +4,9 @@ A living one-page snapshot of the disclose.io ecosystem — every organisation i
 
 The build sweeps `directory.disclose.io` for all ~27.5k programs, fetches detail-page criteria for the higher-tier ones (L3–L5), parses the `disclose/research-threats` and `disclose/bug-bounty-platforms` READMEs, and emits a single self-contained HTML page (~2.4 MB) that can be hosted anywhere static.
 
-**Live staging:** [`state-disclosure-20260429-f12de2b9.pages.dev`](https://state-disclosure-20260429-f12de2b9.pages.dev/) (unlisted).
+**Live:** **https://state.disclose.io/** (this pyramid) · **https://state.disclose.io/top-100/** (the
+[disclosure-audits](https://github.com/disclose/disclosure-audits) safe-harbor scoreboard, featured as a "New"
+hero callout on the pyramid). Older unlisted staging: `state-disclosure-20260429-f12de2b9.pages.dev`.
 
 ---
 
@@ -62,23 +64,36 @@ Output lands at `output/state-of-disclosure.html`. Drop it on any static host.
 
 The live custom domain **`state.disclose.io`** is bound to the Cloudflare Pages project
 **`state-disclosure`** (production branch `main`) — NOT the older
-`state-disclosure-20260429-f12de2b9` staging project. Deploy to `state-disclosure` or the
-live site won't change.
+`state-disclosure-20260429-f12de2b9` staging project.
+
+> ⚠️ **Production hosts TWO things and Pages deploys are FULL-SNAPSHOT.** `state.disclose.io` now serves this
+> pyramid at `/` **and** the disclosure-audits scoreboard at **`/top-100/`** (plus a `_redirects` file). A
+> root-only deploy from *this* repo would **delete `/top-100/` and the redirects** from the live site.
+>
+> **The canonical production deploy lives in [`disclose/disclosure-audits`](https://github.com/disclose/disclosure-audits)
+> → `bun src/deploy-prod.ts --go`.** It rebuilds the whole tree (this pyramid + assets + `/top-100/` + `_redirects`)
+> from source and aborts if anything is missing. After editing this page, regenerate it (`bun run src/build-page.ts`,
+> reads cached JSON — no re-scrape) and then run `deploy-prod.ts`, which sources the pyramid from `$SNAPSHOT_OUT`
+> (default this repo's `output/`).
+
+<details><summary>Pyramid-only deploy (standalone preview / reference — NOT for <code>state-disclosure</code>)</summary>
+
+The raw deploy below ships ONLY this pyramid. It's fine for a *standalone* preview project, but against the
+production `state-disclosure` project it would drop `/top-100/`. Use `deploy-prod.ts` (above) for production.
 
 ```bash
-# Stage assets (regenerated index + the video, poster, and SRLDF logo)
 mkdir -p /tmp/sod-deploy
 cp output/state-of-disclosure.html /tmp/sod-deploy/index.html
 cp output/policymaker-demo.mp4    /tmp/sod-deploy/
 cp output/policymaker-demo.jpg    /tmp/sod-deploy/
 cp output/srldf-logo.svg          /tmp/sod-deploy/
 
-# Deploy with a Pages-scoped Cloudflare API token (works headless — no OAuth needed).
-# Requires CLOUDFLARE_API_TOKEN (Pages → Edit) and CLOUDFLARE_ACCOUNT_ID in the environment.
+# Pages-scoped token (Pages → Edit) + account id in the environment.
 CLOUDFLARE_API_TOKEN="$CF_PAGES_EDIT_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID" \
   bunx wrangler pages deploy /tmp/sod-deploy \
     --project-name=state-disclosure --branch=main --commit-dirty=true
 ```
+</details>
 
 ---
 
