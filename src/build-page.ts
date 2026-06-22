@@ -895,18 +895,16 @@ function renderPage(args: {
   <nav class="hero-nav" aria-label="Page sections">
     <a href="#pyramid">The pyramid</a>
     <a href="#what-you-can-do">Where to next</a>
-    <a href="/top-100/">Top 100 scoreboards</a>
     <a href="#threats">Threats <span class="nav-badge">${threats.length}</span></a>
     <a href="#srldf">Legal defense</a>
     <a href="#platforms">Platforms <span class="nav-badge">${platforms.length}</span></a>
     <a href="#ecosystem">Ecosystem</a>
   </nav>
-  <div class="contrib-strip" data-track="contrib-strip">
-    <span class="contrib-strip-eyebrow">Open source · contributors and maintainers wanted</span>
-    <span class="contrib-strip-prose">Every dataset on this page is community-maintained. Help keep them current:</span>
+  <div class="contrib-strip" data-track="top-100-callout">
+    <span class="contrib-strip-eyebrow">New</span>
+    <span class="contrib-strip-prose">The safe-harbor scoreboard for the world's biggest companies</span>
     <span class="contrib-strip-actions">
-      <a href="https://github.com/disclose/research-threats" target="_blank" rel="noopener" data-track="contrib-strip-threats"><span class="repo-icon" aria-hidden="true">⚖</span> disclose/research-threats <span class="strip-arrow">↗</span></a>
-      <a href="https://github.com/disclose/bug-bounty-platforms" target="_blank" rel="noopener" data-track="contrib-strip-platforms"><span class="repo-icon" aria-hidden="true">⚙</span> disclose/bug-bounty-platforms <span class="strip-arrow">↗</span></a>
+      <a href="/top-100/" data-track="top-100-link">Explore the Top 100 <span class="strip-arrow">→</span></a>
     </span>
   </div>
 </header>
