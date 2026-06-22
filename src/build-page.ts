@@ -895,6 +895,7 @@ function renderPage(args: {
   <nav class="hero-nav" aria-label="Page sections">
     <a href="#pyramid">The pyramid</a>
     <a href="#what-you-can-do">Where to next</a>
+    <a href="/top-100/">Top 100 scoreboards</a>
     <a href="#threats">Threats <span class="nav-badge">${threats.length}</span></a>
     <a href="#srldf">Legal defense</a>
     <a href="#platforms">Platforms <span class="nav-badge">${platforms.length}</span></a>
