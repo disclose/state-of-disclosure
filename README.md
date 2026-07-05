@@ -1,3 +1,25 @@
+<div align="center">
+
+<a href="https://disclose.io"><img src="docs/marquee.png" alt="state-of-disclosure · disclose.io" width="820"></a>
+
+# state-of-disclosure
+
+### The **safe-harbor scoreboard** — how the world's biggest companies actually handle disclosure, measured with rigorous evidence and published. Powered by [directory.disclose.io](https://directory.disclose.io).
+
+<p>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/disclose/state-of-disclosure?color=5B3AB6&label=license" alt="license"></a>
+<a href="https://state.disclose.io"><img src="https://img.shields.io/badge/live-state.disclose.io-5B3AB6" alt="live state.disclose.io"></a>
+<img src="https://img.shields.io/badge/rubric-L0%E2%80%93L5-5B3AB6" alt="rubric L0%E2%80%93L5">
+<a href="https://github.com/disclose/state-of-disclosure/issues"><img src="https://img.shields.io/badge/PRs-welcome-5B3AB6" alt="PRs welcome"></a>
+</p>
+
+*Part of **[the disclose.io Project](https://disclose.io)** — the open, vendor-neutral infrastructure for vulnerability disclosure. [Browse the ecosystem →](https://github.com/disclose)*
+
+</div>
+
+---
+
+
 # state-of-disclosure
 
 A living one-page snapshot of the disclose.io ecosystem — every organisation in `directory.disclose.io` mapped against the disclose.io security maturity model, plus the canonical archive of legal threats against researchers, the registry of bug-bounty/VDP platforms, and the rest of the disclose.io stack.
