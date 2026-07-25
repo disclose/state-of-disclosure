@@ -16,7 +16,8 @@ const API_BASE = `https://widgets.disclosebot.io/directory/${SHORTCODE}`;
 const DIRECTORY_BASE = 'https://directory.disclose.io'; // human-facing; used for the Origin header + downstream org links
 const ORIGIN_HEADER = DIRECTORY_BASE;
 const USER_AGENT = 'state-of-disclosure/2.0 (diostatus-snapshot; +https://state.disclose.io)';
-const REQUEST_DELAY_MS = 200;
+// Override with SCRAPE_DELAY_MS when the API rate-limits (429s start around 5 req/s).
+const REQUEST_DELAY_MS = Number(process.env.SCRAPE_DELAY_MS ?? 200);
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 4;
 
