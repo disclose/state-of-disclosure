@@ -13,3 +13,7 @@ output/chart.html
 
 # Temporary partial snapshots
 data/snapshot-PARTIAL.json
+
+# Quarantine artifacts from the resume-from-complete staleness bug (kept local as evidence)
+data/*.june-bak
+data/*.STALE-DERIVED.json
