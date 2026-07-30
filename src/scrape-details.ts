@@ -173,22 +173,26 @@ function extractPolGridPair(html: string, label: string): { text: string | null;
 function extractSection(html: string, sectionLabel: string): { met: number; total: number; criteria: Record<string, boolean> } {
   // Find the section header and its trailing block until the next section or container close.
   const escaped = sectionLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Two markup generations: pre-2026-07 titles were `Core (5/7)`; the current
+  // directory (detail pages moved to /o/{slug} ~Jul 2026) titles are `Core Attributes`
+  // with no counts, so met/total must be derived from the met/unmet spans.
   const headerRe = new RegExp(
-    `<div class="mat-section-title">${escaped}\\s*\\((\\d+)/(\\d+)\\)</div>([\\s\\S]*?)(?=<div class="mat-section-title">|<div class="att-explainer"|<\\/section>|<footer)`,
+    `<div class="mat-section-title">${escaped}(?:\\s+Attributes)?\\s*(?:\\((\\d+)/(\\d+)\\))?</div>([\\s\\S]*?)(?=<div class="mat-section-title">|<div class="att-explainer"|<\\/section>|<footer)`,
     'i',
   );
   const m = html.match(headerRe);
   const criteria: Record<string, boolean> = {};
   if (!m) return { met: 0, total: 0, criteria };
 
-  const met = Number.parseInt(m[1], 10);
-  const total = Number.parseInt(m[2], 10);
   const block = m[3];
-
   for (const cm of block.matchAll(/<span class="(met|unmet)">([^<]+)<\/span>/gi)) {
     const name = decodeHtmlEntities(cm[2]);
     criteria[name] = cm[1] === 'met';
   }
+
+  const spanMet = Object.values(criteria).filter(Boolean).length;
+  const met = m[1] !== undefined ? Number.parseInt(m[1], 10) : spanMet;
+  const total = m[2] !== undefined ? Number.parseInt(m[2], 10) : Object.keys(criteria).length;
 
   return { met, total, criteria };
 }
