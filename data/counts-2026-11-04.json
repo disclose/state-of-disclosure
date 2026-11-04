@@ -1,0 +1,46 @@
+{
+  "fetchedAt": "2026-11-04T23:04:10.196Z",
+  "sourceSnapshot": "snapshot-2026-11-04.json",
+  "directoryBase": "https://directory.disclose.io",
+  "totalProgramsAdvertised": 28112,
+  "totalProgramsCaptured": 28112,
+  "note": "Level 0 (Not Present) orgs are excluded by definition — they are not in the directory. Level 1 (Contact Only) orgs are those listed without a maturity badge.",
+  "levels": [
+    {
+      "level": 0,
+      "name": "Not Present",
+      "count": 0,
+      "percent": 0
+    },
+    {
+      "level": 1,
+      "name": "Contact Only",
+      "count": 4887,
+      "percent": 17.38
+    },
+    {
+      "level": 2,
+      "name": "Basic VDP",
+      "count": 20851,
+      "percent": 74.17
+    },
+    {
+      "level": 3,
+      "name": "Partial Safe Harbor",
+      "count": 1598,
+      "percent": 5.68
+    },
+    {
+      "level": 4,
+      "name": "Full Safe Harbor",
+      "count": 597,
+      "percent": 2.12
+    },
+    {
+      "level": 5,
+      "name": "Full Safe Harbor + CVD",
+      "count": 179,
+      "percent": 0.64
+    }
+  ]
+}

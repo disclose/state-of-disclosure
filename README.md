@@ -36,7 +36,7 @@ hero callout on the pyramid). Older unlisted staging: `state-disclosure-20260429
 
 | Section | What it is |
 |---|---|
-| Pyramid | All 27,583 orgs as bubbles, stacked into the 5 maturity levels — click for criteria, contacts, links |
+| Pyramid | Every directory org (28,112 as of 2026-11-04) as bubbles, stacked into the 5 maturity levels — click for criteria, contacts, links |
 | Demo | A 36-second no-narration walkthrough of `policymaker.disclose.io` with a "build your policy" CTA |
 | Three roles | Audience-targeted CTAs for researchers, vendors, and operators |
 | Threats | Bubble-vs-timeline visualization of the ~91 confirmed legal threats against researchers, with grey rings for the ~19 pending submissions; the table below expands inline |
@@ -52,11 +52,12 @@ hero callout on the pyramid). Older unlisted staging: `state-disclosure-20260429
 Requires [Bun](https://bun.sh).
 
 ```bash
-# 1. Sweep the directory via the disclosebot JSON API for all programs (~5 min, resumable)
-#    API: widgets.disclosebot.io/directory/adf701?page=N — origin-gated (sends the
-#    `Origin: https://directory.disclose.io` header), perPage locked at 25 → 1,104 pages.
-#    maturity{level,score,label} comes inline; API level-0 ("None") is folded into L1 to
-#    match the directory's 5-tier pyramid. The old HTML listing scrape is retired.
+# 1. Sweep the directory listing for all programs (~5 min, resumable within the same UTC day)
+#    Source: directory.disclose.io/?page=N, server-rendered HTML, 25 rows per page.
+#    Each row carries the /o/{slug} link, an "L{n} ..." maturity badge, and a raw "/ 120" score.
+#    (The disclosebot JSON API used through 2026-07 now returns 404.) Any sub-tier L0 is folded
+#    into L1 to keep the directory's 5-tier pyramid. A completed sweep deletes data/progress.json,
+#    so a later run can never "resume" an old sweep under a new date.
 bun run src/scrape.ts
 
 # 2. Fetch detail pages for L5 → L4 → L3 (~30 min, resumable per level)

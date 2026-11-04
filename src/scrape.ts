@@ -1,25 +1,25 @@
-// Sweep the disclose.io directory via the disclosebot JSON API and capture the maturity
-// level/score for every org. One-shot snapshot — re-runnable, resumable.
+// Sweep the disclose.io directory listing and capture the maturity level/score for every org.
+// One-shot snapshot, re-runnable, resumable within the same UTC day.
 //
-// API: https://widgets.disclosebot.io/directory/{shortcode}?page=N
-//   * origin-gated — requires the `Origin: https://directory.disclose.io` header
-//   * perPage is locked server-side at 25 (the param is ignored); CSV export disabled
-//   * each org carries maturity{level,score,label} inline, so the old two-stage HTML scrape
-//     (listing badge-class + per-detail-page) collapses to this single pass for the listing.
+// Source: https://directory.disclose.io/?page=N (server-rendered HTML, 25 rows per page).
+//   * The disclosebot JSON API (widgets.disclosebot.io/directory/adf701) that this scraper
+//     used through 2026-07 now returns 404; the directory moved to static server-rendered pages
+//     with per-org detail pages at /o/{slug}.
+//   * Each listing row carries: /o/{slug} link + title, a maturity badge "L{n} {label}",
+//     and a raw score "{x} / 120".
 //
-// The emitted snapshot keeps the SAME schema the previous HTML scraper produced
+// The emitted snapshot keeps the SAME schema as before
 // ({slug, program_name, badge, badge_text, score_percent, level}) so aggregate.ts,
-// scrape-details.ts, and build-page.ts all run unchanged.
+// scrape-details.ts, and build-page.ts run unchanged. `score_percent` has always held the
+// raw /120 score (L5 orgs exceed 100), and still does.
 
-const SHORTCODE = 'adf701';
-const API_BASE = `https://widgets.disclosebot.io/directory/${SHORTCODE}`;
-const DIRECTORY_BASE = 'https://directory.disclose.io'; // human-facing; used for the Origin header + downstream org links
-const ORIGIN_HEADER = DIRECTORY_BASE;
-const USER_AGENT = 'state-of-disclosure/2.0 (diostatus-snapshot; +https://state.disclose.io)';
-// Override with SCRAPE_DELAY_MS when the API rate-limits (429s start around 5 req/s).
-const REQUEST_DELAY_MS = Number(process.env.SCRAPE_DELAY_MS ?? 200);
-const FETCH_TIMEOUT_MS = 20_000;
+const DIRECTORY_BASE = 'https://directory.disclose.io';
+const USER_AGENT = 'state-of-disclosure/3.0 (diostatus-snapshot; +https://state.disclose.io)';
+const REQUEST_DELAY_MS = Number(process.env.SCRAPE_DELAY_MS ?? 100);
+const CONCURRENCY = Number(process.env.SCRAPE_CONCURRENCY ?? 4);
+const FETCH_TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 4;
+const PER_PAGE = 25;
 
 const PROGRESS_PATH = `${import.meta.dir}/../data/progress.json`;
 const today = new Date().toISOString().slice(0, 10);
@@ -27,14 +27,9 @@ const SNAPSHOT_PATH = `${import.meta.dir}/../data/snapshot-${today}.json`;
 
 type BadgeKey = 'basic' | 'partial' | 'full' | 'full-pluscvd' | null;
 
-// Inverse of the legacy CSS-class→level mapping, so downstream code that keys off `badge`
-// (build-page.ts) keeps working. Level 1 (Contact Only) and 0 carry no badge.
-const LEVEL_TO_BADGE: Record<number, BadgeKey> = {
-  2: 'basic',
-  3: 'partial',
-  4: 'full',
-  5: 'full-pluscvd',
-};
+const LEVEL_TO_BADGE: Record<number, BadgeKey> = { 2: 'basic', 3: 'partial', 4: 'full', 5: 'full-pluscvd' };
+// Short labels the page has always rendered; the directory's long labels vary ("L2 Basic VDP").
+const LEVEL_TO_TEXT: Record<number, string> = { 2: 'Basic', 3: 'Partial', 4: 'Full', 5: 'Full+CVD' };
 
 interface OrgRow {
   slug: string;
@@ -47,81 +42,60 @@ interface OrgRow {
 
 interface Progress {
   startedAt: string;
-  lastCompletedPage: number;
+  day: string;
   totalPages: number;
-  totalProgramsAdvertised: number | null;
-  orgs: OrgRow[];
+  totalProgramsAdvertised: number;
+  pages: Record<string, OrgRow[]>;
 }
 
-// ---- API response shapes (only the fields we read) ----
-interface ApiMaturity {
-  level: number | null;
-  score: number | null;
-  label: string | null;
-}
-interface ApiOrg {
-  id: string;
-  name: string;
-  slug: string;
-  maturity: ApiMaturity | null;
-}
-interface ApiPagination {
-  page: number;
-  perPage: number;
-  totalItems: number;
-  totalPages: number;
-}
-interface ApiResponse {
-  organizations: ApiOrg[];
-  pagination: ApiPagination;
+const decode = (s: string) =>
+  s.replace(/&amp;/g, '&').replace(/&#39;|&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+
+export function parseTotal(html: string): number | null {
+  const m = html.match(/([\d,]+)\s+organizations/);
+  return m ? Number(m[1].replace(/,/g, '')) : null;
 }
 
-function mapOrg(api: ApiOrg): OrgRow | null {
-  if (!api || typeof api.slug !== 'string' || api.slug.length === 0) return null;
-  const m = api.maturity ?? { level: null, score: null, label: null };
-  const rawLevel = typeof m.level === 'number' && Number.isFinite(m.level) ? m.level : 1;
-  // The directory's 5-tier pyramid floors at L1 (Contact Only). The API exposes a sub-tier
-  // "None" (level 0) for orgs with no policy at all; the legacy HTML scraper lumped these into
-  // L1 (unbadged). Fold 0→1 to match that contract and keep the 5-level design (no L0 palette).
-  const level = rawLevel < 1 ? 1 : rawLevel;
-  const badged = level >= 2;
-  return {
-    slug: api.slug,
-    program_name: typeof api.name === 'string' ? api.name : api.slug,
-    badge: LEVEL_TO_BADGE[level] ?? null,
-    badge_text: badged && typeof m.label === 'string' ? m.label : null,
-    score_percent: badged && typeof m.score === 'number' && Number.isFinite(m.score) ? m.score : null,
-    level,
-  };
+export function parseRows(html: string): OrgRow[] {
+  const rows: OrgRow[] = [];
+  for (const chunk of html.split(/<tr[\s>]/).slice(1)) {
+    const link = chunk.match(/<a href="?\/o\/([^"\s>]+)"?\s+title="([^"]*)"/);
+    if (!link) continue;
+    const slug = link[1];
+    const name = decode(link[2]) || slug;
+    const badge = chunk.match(/data-maturity-assessment-badge>\s*L(\d)\b/);
+    const score = chunk.match(/data-field="score">[\s\S]*?>([\d.]+)<\/span>/);
+    const raw = badge ? Number(badge[1]) : 1;
+    const level = raw < 1 ? 1 : raw; // fold sub-tier L0 into L1, preserving the 5-tier pyramid
+    const badged = level >= 2;
+    rows.push({
+      slug,
+      program_name: name,
+      badge: LEVEL_TO_BADGE[level] ?? null,
+      badge_text: badged ? LEVEL_TO_TEXT[level] : null,
+      score_percent: badged && score ? Number(score[1]) : null,
+      level,
+    });
+  }
+  return rows;
 }
 
-async function fetchPage(page: number): Promise<ApiResponse> {
-  const url = `${API_BASE}?page=${page}`;
+async function fetchPage(page: number): Promise<string> {
+  const url = `${DIRECTORY_BASE}/?page=${page}`;
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await fetch(url, {
+      const res = await fetch(url, {
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         redirect: 'follow',
-        headers: {
-          'User-Agent': USER_AGENT,
-          'Origin': ORIGIN_HEADER,
-          'Referer': `${ORIGIN_HEADER}/`,
-          'Accept': 'application/json',
-        },
+        headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
       });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} on page ${page}`);
-      }
-      const json = (await response.json()) as ApiResponse;
-      if (!json || !Array.isArray(json.organizations) || !json.pagination) {
-        throw new Error(`malformed response on page ${page}`);
-      }
-      return json;
+      if (!res.ok) throw new Error(`HTTP ${res.status} on page ${page}`);
+      return await res.text();
     } catch (err) {
       lastErr = err;
       const backoff = 800 * attempt * attempt;
-      console.warn(`  ! page ${page} attempt ${attempt} failed: ${(err as Error).message} — retrying in ${backoff}ms`);
+      console.warn(`  ! page ${page} attempt ${attempt} failed: ${(err as Error).message}; retrying in ${backoff}ms`);
       await Bun.sleep(backoff);
     }
   }
@@ -132,101 +106,92 @@ async function loadProgress(): Promise<Progress | null> {
   const file = Bun.file(PROGRESS_PATH);
   if (!(await file.exists())) return null;
   try {
-    return (await file.json()) as Progress;
+    const p = (await file.json()) as Progress;
+    // Only resume an unfinished sweep from the SAME UTC day. A finished or older progress file
+    // once made a "fresh" run reuse a 3-month-old sweep under today's date (2026-11-04).
+    if (p.day !== today || !p.pages || typeof p.pages !== 'object') return null;
+    return p;
   } catch {
     return null;
   }
 }
 
-async function saveProgress(progress: Progress): Promise<void> {
-  await Bun.write(PROGRESS_PATH, JSON.stringify(progress, null, 2));
-}
-
 async function main(): Promise<void> {
-  console.log(`diostatus-snapshot: scraping API ${API_BASE}`);
+  console.log(`diostatus-snapshot: scraping ${DIRECTORY_BASE}/?page=N`);
+
+  const first = await fetchPage(1);
+  const total = parseTotal(first);
+  const firstRows = parseRows(first);
+  if (!total || firstRows.length === 0) throw new Error('page 1 did not parse (no total or no rows): listing markup changed?');
+  const totalPages = Math.ceil(total / PER_PAGE);
 
   let progress = await loadProgress();
-  let startPage = 1;
-
-  if (progress && progress.lastCompletedPage > 0 && progress.totalPages > 0) {
-    console.log(`Resuming: ${progress.orgs.length} orgs captured through page ${progress.lastCompletedPage}/${progress.totalPages}`);
-    startPage = progress.lastCompletedPage + 1;
+  if (progress && (progress.totalProgramsAdvertised !== total || progress.totalPages !== totalPages)) {
+    console.log('Directory total changed since the partial run; starting over.');
+    progress = null;
+  }
+  if (!progress) {
+    progress = { startedAt: new Date().toISOString(), day: today, totalPages, totalProgramsAdvertised: total, pages: {} };
   } else {
-    progress = {
-      startedAt: new Date().toISOString(),
-      lastCompletedPage: 0,
-      totalPages: 0,
-      totalProgramsAdvertised: null,
-      orgs: [],
-    };
+    console.log(`Resuming same-day sweep: ${Object.keys(progress.pages).length}/${totalPages} pages done`);
   }
+  progress.pages['1'] = firstRows;
+  console.log(`Discovered: ${total.toLocaleString()} organizations across ${totalPages} pages`);
 
-  const seenSlugs = new Set(progress.orgs.map(o => o.slug));
+  const todo: number[] = [];
+  for (let p = 2; p <= totalPages; p++) if (!progress.pages[String(p)]) todo.push(p);
 
-  // Probe page 1 to learn totalPages/totalItems if we don't already know.
-  if (progress.totalPages === 0) {
-    const first = await fetchPage(1);
-    progress.totalPages = first.pagination.totalPages;
-    progress.totalProgramsAdvertised = first.pagination.totalItems;
-    console.log(`Discovered: ${first.pagination.totalItems.toLocaleString()} programs across ${progress.totalPages} pages (perPage ${first.pagination.perPage})`);
-
-    for (const apiOrg of first.organizations) {
-      const row = mapOrg(apiOrg);
-      if (row && !seenSlugs.has(row.slug)) {
-        progress.orgs.push(row);
-        seenSlugs.add(row.slug);
+  let done = 0;
+  const worker = async () => {
+    while (todo.length) {
+      const page = todo.shift()!;
+      const rows = parseRows(await fetchPage(page));
+      const expected = page === totalPages ? total - PER_PAGE * (totalPages - 1) : PER_PAGE;
+      if (rows.length !== expected) throw new Error(`page ${page}: parsed ${rows.length} rows, expected ${expected}`);
+      progress!.pages[String(page)] = rows;
+      if (++done % 50 === 0) {
+        await Bun.write(PROGRESS_PATH, JSON.stringify(progress));
+        console.log(`  ${Object.keys(progress!.pages).length}/${totalPages} pages`);
       }
+      await Bun.sleep(REQUEST_DELAY_MS);
     }
-    progress.lastCompletedPage = 1;
-    await saveProgress(progress);
-    startPage = 2;
-    await Bun.sleep(REQUEST_DELAY_MS);
+  };
+  try {
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  } finally {
+    await Bun.write(PROGRESS_PATH, JSON.stringify(progress));
   }
 
-  for (let page = startPage; page <= progress.totalPages; page++) {
-    const parsed = await fetchPage(page);
-
-    let added = 0;
-    for (const apiOrg of parsed.organizations) {
-      const row = mapOrg(apiOrg);
-      if (row && !seenSlugs.has(row.slug)) {
-        progress.orgs.push(row);
-        seenSlugs.add(row.slug);
-        added++;
-      }
+  const seen = new Set<string>();
+  const orgs: OrgRow[] = [];
+  for (let p = 1; p <= totalPages; p++) {
+    for (const row of progress.pages[String(p)] ?? []) {
+      if (!seen.has(row.slug)) { seen.add(row.slug); orgs.push(row); }
     }
-    progress.lastCompletedPage = page;
-
-    if (page % 25 === 0 || page === progress.totalPages || parsed.organizations.length === 0) {
-      await saveProgress(progress);
-      const pct = ((page / progress.totalPages) * 100).toFixed(1);
-      console.log(`  page ${page}/${progress.totalPages} (${pct}%) — +${added} (${progress.orgs.length} total, ${parsed.organizations.length} on page)`);
-    }
-
-    if (parsed.organizations.length === 0) {
-      console.log(`  page ${page} returned 0 orgs — stopping early`);
-      break;
-    }
-
-    await Bun.sleep(REQUEST_DELAY_MS);
+  }
+  if (orgs.length !== total) {
+    console.warn(`WARNING: captured ${orgs.length} unique orgs vs ${total} advertised (pagination shifted mid-sweep?)`);
   }
 
-  // Finalise snapshot — schema identical to the previous HTML scraper's output.
   const snapshot = {
     fetchedAt: progress.startedAt,
     finishedAt: new Date().toISOString(),
     directoryBase: DIRECTORY_BASE,
-    sourceApi: API_BASE,
-    totalProgramsAdvertised: progress.totalProgramsAdvertised,
-    totalProgramsCaptured: progress.orgs.length,
-    pages: progress.totalPages,
-    orgs: progress.orgs,
+    sourceApi: `${DIRECTORY_BASE}/?page=N`,
+    totalProgramsAdvertised: total,
+    totalProgramsCaptured: orgs.length,
+    pages: totalPages,
+    orgs,
   };
   await Bun.write(SNAPSHOT_PATH, JSON.stringify(snapshot, null, 2));
-  console.log(`\nWrote ${SNAPSHOT_PATH} (${progress.orgs.length} orgs, advertised ${progress.totalProgramsAdvertised?.toLocaleString() ?? '?'})`);
+  // A completed sweep must never be "resumed" by a later run.
+  await Bun.file(PROGRESS_PATH).delete();
+  console.log(`\nWrote ${SNAPSHOT_PATH} (${orgs.length} orgs, advertised ${total.toLocaleString()})`);
 }
 
-main().catch(err => {
-  console.error('FATAL:', err);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch(err => {
+    console.error('FATAL:', err);
+    process.exit(1);
+  });
+}
