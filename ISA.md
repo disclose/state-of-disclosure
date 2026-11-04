@@ -3,10 +3,10 @@ project: state-of-disclosure
 slug: diostatus-api-migration
 effort: E3
 phase: complete
-progress: 15/16
+progress: 22/23
 mode: ALGORITHM
 started: 2026-06-18
-updated: 2026-06-19
+updated: 2026-11-04
 ---
 
 # ISA — State of Disclosure (diostatus-snapshot)
@@ -74,6 +74,18 @@ redeploy so `state.disclose.io` reflects current directory data, verified live w
 - [x] ISC-15: Anti: snapshot contains 0 orgs with non-finite `level` (verified)
 - [x] ISC-16: Anti: build-page joined same-dated 2026-06-19 details (not stale Apr-29) — build log shows L5:183 L4:728 L3:1597
 
+### 2026-11-04: listing source moved back to HTML (disclosebot API is dead)
+
+ISC-1 and ISC-2 are superseded by ISC-17 and ISC-18 (the API they pin returns 404); kept as history.
+
+- [x] ISC-17: `scrape.ts` pages `directory.disclose.io/?page=N` (server-rendered, 25 rows/page) and parses slug, name, `L{n}` badge, raw `/ 120` score per row
+- [x] ISC-18: Advertised total parsed from the page-1 "N organizations" headline; each page asserts 25 rows (remainder on the last page)
+- [x] ISC-19: Anti: a finished or previous-day `progress.json` is never resumed; completed sweeps delete it
+- [x] ISC-20: Captured 28,112 = advertised 28,112 (delta +0); distribution {1:4887, 2:20851, 3:1598, 4:597, 5:179}
+- [x] ISC-21: 60/60 sampled orgs (12 per level) match the level on their own `/o/{slug}` page, across both detail templates
+- [x] ISC-22: Live `state.disclose.io` SHA-256 == built `output/state-of-disclosure.html`
+- [ ] ISC-23: Criteria checklist for the 353 L3-5 "no published policy" orgs (directory renders a "Signals N of 10" panel, no Core/Bonus): not parsed; the page methodology now says so
+
 ## Test Strategy
 
 | isc | type | check | threshold | tool |
@@ -98,6 +110,9 @@ redeploy so `state.disclose.io` reflects current directory data, verified live w
 
 ## Decisions
 
+- 2026-11-04: Listing scrape moved to the server-rendered HTML (API 404). `score_percent` keeps the raw /120 value it always held; `badge_text` keeps the short labels (Basic/Partial/Full/Full+CVD) rather than the directory's variable long labels, so the page renders unchanged.
+- 2026-11-04: `scrape-details.ts` left as-is: its parser covers both Core/Bonus templates; the Signals template has nothing to parse into the existing schema.
+
 - 2026-06-18: API discovered at `widgets.disclosebot.io/directory/adf701` (origin-gated) after
   ruling out static JSON, per-page Hugo JSON, `api.`/`data.` hosts, and the diodb dump
   (diodb's `program-list.json` is the old curated subset, not the 27.5k directory). The
@@ -114,6 +129,15 @@ redeploy so `state.disclose.io` reflects current directory data, verified live w
   required / env tokens lack Pages perms" was stale).
 
 ## Changelog
+
+- **conjectured** (2026-11-04): the disclosebot API was a stable backend, and a completed run's `progress.json` was harmless.
+  **refuted_by**: `widgets.disclosebot.io/directory/adf701` returns a Rails 404; the directory is now server-rendered (28,112 orgs, `/o/{slug}` detail pages). Separately, the July `progress.json` (lastCompletedPage 1104/1104) made the 2026-11-04 refresh "scrape" in 2 minutes and write July's 27,584 orgs under today's date; it was killed before deploy.
+  **learned**: the directory's data surface has changed twice in five months, so the scraper must fail loudly on a shape change (row-count assertion per page), and resume state must be scoped to one in-flight sweep. A scrape that finishes in under a minute is a stale resume, not a fast network.
+  **criterion_now**: ISC-17..19.
+- **conjectured** (2026-11-04): every L3-5 detail page carries the Core/Bonus checklist.
+  **refuted_by**: three detail templates exist: "Level N of 5" with Core/Bonus, "{x} / 120 L{n} ..." with Core/Bonus, and "No published disclosure policy yet ... Signals N of 10 present" (353 orgs, e.g. Atlassian, Boeing) with no checklist.
+  **learned**: the 85% enrichment rate is the directory's shape, not a parser drop; levels still agree.
+  **criterion_now**: ISC-23 (open).
 
 - **conjectured**: the new directory API would be a discoverable public REST/JSON endpoint on
   directory.disclose.io (per-page JSON, `/api`, or a `data.`/`api.` host).
@@ -138,6 +162,10 @@ redeploy so `state.disclose.io` reflects current directory data, verified live w
   **criterion_now**: ISC-8 pins the exact distribution; mapOrg floors level at 1.
 
 ## Verification
+
+- 2026-11-04 ISC-20: `snapshot-2026-11-04.json` 28,112 captured = 28,112 advertised; directory headline "28,112 organizations".
+- 2026-11-04 ISC-21: 60/60 level matches against `/o/{slug}` (first probe read 3/15 because its regex hit the page legend; re-probed on the per-org marker).
+- 2026-11-04 ISC-22: `2e30c9fd...ded78` for both the built file and `curl https://state.disclose.io/`; deployment `f8ac8c22.state-disclosure.pages.dev`; pushed as `7d54b11`.
 
 - ISC-7: `snapshot-2026-06-19.json` totalProgramsCaptured = 27,583 = advertised (delta +0).
 - ISC-8: distribution {1:473, 2:24600, 3:1597, 4:730, 5:183}, sums to 27,583, 0 dupes, 0 L0 remaining.

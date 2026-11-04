@@ -1156,7 +1156,7 @@ function renderPage(args: {
     <details class="about-snapshot">
       <summary>About this snapshot</summary>
       <div class="about-body">
-        <p>This page captures the state of <a href="${directoryBase}">directory.disclose.io</a> at a point in time. Each organisation's maturity level (1–5) is read from the directory's badge — Level 0 (no findable contact) is excluded by definition, since those orgs aren't in the directory. Levels 3–5 are enriched with full criteria detail (Core 0–9, Bonus 0–3) by visiting each org's detail page. Threats data is parsed from the canonical <code>disclose/research-threats</code> README; pending entries are open issues on the same repo. Platforms are parsed from <code>disclose/bug-bounty-platforms</code>.</p>
+        <p>This page captures the state of <a href="${directoryBase}">directory.disclose.io</a> at a point in time. Each organisation's maturity level (1–5) is read from the directory's badge. Level 0 (no findable contact) is excluded by definition, since those orgs aren't in the directory. Levels 3–5 are enriched with full criteria detail (Core 0–9, Bonus 0–3) by visiting each org's detail page. Organisations the directory assessed without a published policy show a signals summary there instead of a criteria checklist, so their cards carry a level and score but no checklist. Threats data is parsed from the canonical <code>disclose/research-threats</code> README; pending entries are open issues on the same repo. Platforms are parsed from <code>disclose/bug-bounty-platforms</code>.</p>
         <p>The snapshot is regenerated on demand. Numbers will drift slightly between runs as orgs are added, attest, or improve their score.</p>
       </div>
     </details>
