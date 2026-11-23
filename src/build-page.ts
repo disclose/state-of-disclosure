@@ -11,12 +11,17 @@
 // org's directory.disclose.io page in a new tab. Hover → tooltip with details.
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const DATA_DIR = `${import.meta.dir}/../data`;
 const OUT_PATH = `${import.meta.dir}/../output/state-of-disclosure.html`;
 const HUGO_EXTERNAL = `${process.env.HOME}/Projects/disclose-io-hugo/external`;
-const THREATS_README = `${HUGO_EXTERNAL}/research-threats/README.md`;
-const PLATFORMS_README = `${HUGO_EXTERNAL}/bug-bounty-platforms/README.md`;
+// Both registries can be pointed at a fresh upstream copy (THREATS_README / PLATFORMS_README), so a
+// stale local checkout cannot quietly drop rows from the page.
+const THREATS_README = process.env.THREATS_README || `${HUGO_EXTERNAL}/research-threats/README.md`;
+const PLATFORMS_README = process.env.PLATFORMS_README || `${HUGO_EXTERNAL}/bug-bounty-platforms/README.md`;
+// Relative links in the threats README (goodies/*.pdf and friends) point at files in that repo.
+const THREATS_BLOB_BASE = 'https://github.com/disclose/research-threats/blob/master/';
 const PENDING_PATH = `${DATA_DIR}/threats-pending.json`;
 
 type BadgeKey = 'basic' | 'partial' | 'full' | 'full-pluscvd' | null;
@@ -122,14 +127,30 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Resolve a markdown link target (already HTML-escaped) to an absolute href, or null when it cannot
+// be linked. A relative target would otherwise resolve against state.disclose.io and 404.
+function resolveHref(escapedUrl: string, repoBlobBase?: string, repoDir?: string): string | null {
+  const u = escapedUrl.trim().replace(/^&lt;/, '').replace(/&gt;$/, '').trim();
+  if (!u) return null;
+  if (/^(https?:\/\/|mailto:)/i.test(u) || u.startsWith('#')) return u.replace(/"/g, '&quot;');
+  if (/^www\./i.test(u)) return 'https://' + u.replace(/"/g, '&quot;');
+  if (/^[a-z][a-z0-9+.-]*:/i.test(u)) return null; // unknown scheme: render as text
+  if (!repoBlobBase) return null;
+  let path = u.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/^\.?\//, '');
+  // The README sometimes omits the goodies/ prefix; use the file's real location when we can see it.
+  if (repoDir && !existsSync(join(repoDir, path)) && existsSync(join(repoDir, 'goodies', path))) path = 'goodies/' + path;
+  return repoBlobBase + path.split('/').map(encodeURIComponent).join('/');
+}
+
 // Convert a markdown cell into safe HTML: escape, then re-introduce <a> for [text](url)
 // and <strong> for **bold**. Anything else is plain text.
-function mdCellToHtml(raw: string): string {
+function mdCellToHtml(raw: string, repoBlobBase?: string, repoDir?: string): string {
   let s = escapeHtml(raw);
-  // [text](url) — text already escaped, so href needs escaping too.
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
-    const safeUrl = url.replace(/"/g, '&quot;');
-    return `<a href="${safeUrl}" target="_blank" rel="noopener">${text}</a>`;
+  // [text](url) — text already escaped, so href needs escaping too. An empty or unlinkable target
+  // renders as plain text rather than a dead anchor.
+  s = s.replace(/\[([^\]]+)\]\(([^)]*)\)/g, (_, text, url) => {
+    const href = resolveHref(url, repoBlobBase, repoDir);
+    return href ? `<a href="${href}" target="_blank" rel="noopener">${text}</a>` : text;
   });
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   return s;
@@ -138,7 +159,7 @@ function mdCellToHtml(raw: string): string {
 // Strip markdown link syntax to plain text (for sort keys / search index).
 function mdToPlainText(raw: string): string {
   return raw
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]*)\)/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
@@ -173,12 +194,12 @@ function parseThreats(): ThreatRow[] {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     rows.push({
       date,
-      entity_html: mdCellToHtml(entity),
+      entity_html: mdCellToHtml(entity, THREATS_BLOB_BASE, dirname(THREATS_README)),
       entity_text: mdToPlainText(entity),
-      researcher_html: mdCellToHtml(researcher),
+      researcher_html: mdCellToHtml(researcher, THREATS_BLOB_BASE, dirname(THREATS_README)),
       researcher_text: mdToPlainText(researcher),
-      topic: mdCellToHtml(topic),
-      status_html: mdCellToHtml(status),
+      topic: mdCellToHtml(topic, THREATS_BLOB_BASE, dirname(THREATS_README)),
+      status_html: mdCellToHtml(status, THREATS_BLOB_BASE, dirname(THREATS_README)),
     });
   }
   return rows.sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -1292,7 +1313,7 @@ function renderPage(args: {
     if (o.S) links.push('<a href="' + escapeAttr(o.S) + '" target="_blank" rel="noopener">security.txt ↗</a>');
     if (o.e) links.push('<a href="mailto:' + escapeAttr(o.e) + '">' + escapeHtml(o.e) + '</a>');
     if (o.u) links.push('<a href="' + escapeAttr(o.u) + '" target="_blank" rel="noopener">Contact form ↗</a>');
-    links.push('<a href="' + directoryBase + '/' + o.s + '" target="_blank" rel="noopener" style="font-weight:600;">View on directory.disclose.io ↗</a>');
+    links.push('<a href="' + directoryBase + '/o/' + o.s + '" target="_blank" rel="noopener" style="font-weight:600;">View on directory.disclose.io ↗</a>');
 
     panelBody.innerHTML =
       '<h3>' + escapeHtml(o.n) + '</h3>' +
